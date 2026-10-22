@@ -46,6 +46,7 @@ void test_display(void);
 void test_font(void);
 void test_print(void);
 void test_keyboard(void);
+void test_edit(void);
 void test_emu(void);
 
 #endif

@@ -140,3 +140,111 @@ void lcd_hw_setup(uint8_t *ds)
     ds[0xF031] = 23;  /* mode */
     ds[0xF032] = 20;  /* contrast */
 }
+
+/* byte_position - the ROM numbers the keyboard matrix by "how many times the
+ * byte shifts right before it reaches zero", i.e. the position of the highest
+ * set bit, counted from one.  A multi-bit byte takes the position of its top
+ * bit, exactly like the `srl` loop in the original code does. */
+static uint8_t byte_position(uint8_t v)
+{
+    uint8_t n = 0;
+
+    while (v > 0) {
+        n++;
+        v >>= 1;
+    }
+    return n;
+}
+
+/* 0x29892 - keycode_cvt.  Reads the two scanner bytes at key_storage
+ * ([0] = column/KO, [1] = row/KI), maps the pair to an index in the keycode
+ * table and returns the 16-bit logical keycode stored there.  Either byte
+ * being zero (no key pressed in that direction) yields 0.  Pure function:
+ * nothing is written back to the storage pair. */
+uint16_t keycode_cvt(uint8_t *ds, uint16_t key_storage, uint16_t table)
+{
+    uint8_t col = ds[key_storage];
+    uint8_t row = ds[key_storage + 1];
+    uint16_t index;
+    uint16_t entry;
+
+    if (row == 0 || col == 0)
+        return 0;
+
+    index = (uint16_t)((byte_position(col) - 1) << 3);
+    index = (uint16_t)(index + byte_position(row) - 1);
+
+    entry = (uint16_t)(table + 2 * index);
+    return (uint16_t)(ds[entry] | ((uint16_t)ds[entry + 1] << 8));
+}
+
+/* 0x23CA4 - wait 10 timer ticks.  The push/pop of xr0 around the call keeps
+ * the caller's er0; in this model timer_delay takes no values anyway. */
+void wait_10_ticks(uint8_t *ds)
+{
+    timer_delay(ds, 10);
+}
+
+/* 0x0A058 / 0x0A05C - `ei; rt` and `di; rt`.  Nothing in the data space
+ * moves; the stubs exist so callers that branch-register into them stay
+ * self-contained. */
+void interrupts_enable(void)
+{
+}
+
+void interrupts_disable(void)
+{
+}
+
+/* 0x0A012 - hardware bring-up.  Composed of routines already ported; the
+ * only new bits are the three register pokes and the 80-iteration spin,
+ * which has no observable effect (it just burns a few hundred cycles while
+ * the power/i-clock settles). */
+void hw_init(uint8_t *ds)
+{
+    ds[SFR_0F00A] = 49;   /* arm interrupt sources */
+    ds[SFR_0F028] = 23;   /* bus/IO divider */
+
+    /* mov r0, 80 / add r0, 255 / bc ne — a busy wait over 80 decs; time only,
+     * so there is no state to model. */
+
+    timer_prescale_setup(ds);
+    key_filter_clear(ds);
+
+    ds[SFR_0F03D] = 7;    /* LCD drive level */
+    timer_delay(ds, 80);  /* settle delay, counted in timer ticks */
+
+    lcd_hw_setup(ds);
+    hw_clear_0F220(ds);
+    hw_clear_0F048(ds);
+
+    ds[SFR_0F041] = 0;    /* keyboard region register */
+    keyboard_reset(ds);
+    key_output_zero(ds);
+}
+
+/* 0x0A18A - the one-direction key poll.  er0 starts at 0 and only becomes 1
+ * once the row bit has stayed clear for all five samples; zero_KO runs on
+ * both exit paths *after* the event word is parked, because the ROM falls
+ * straight through the confirm branch into the cleanup. */
+uint8_t poll_on_key(uint8_t *ds)
+{
+    uint8_t tries = 5;
+
+    ds[SFR_KEY_OUTPUT] = 0x10;
+
+    for (;;) {
+        if ((ds[SFR_KEY_INPUT] >> 2) & 1) {
+            ds[SFR_KEY_OUTPUT] = 0;
+            return 0;
+        }
+        if (--tries == 0)
+            break;
+        wait_10_ticks(ds);
+    }
+
+    ds[RAM_0D150] = 0x04;      /* st er0, [0xD150] with er0 = 0x1004 */
+    ds[RAM_0D150 + 1] = 0x10;
+    ds[SFR_KEY_OUTPUT] = 0;
+    return 1;
+}

@@ -13,8 +13,8 @@ mkdir -p build
 echo "== differential tests =="
 $CC $CFLAGS -o build/diff_all \
     tests/main.c tests/harness.c \
-    tests/t_string.c tests/t_mem.c tests/t_display.c tests/t_font.c tests/t_print.c tests/t_keyboard.c tests/t_emu.c \
-    src/string.c src/mem.c src/display.c src/font.c src/print.c src/keyboard.c \
+    tests/t_string.c tests/t_mem.c tests/t_display.c tests/t_font.c tests/t_print.c tests/t_keyboard.c tests/t_edit.c tests/t_emu.c \
+    src/string.c src/mem.c src/display.c src/font.c src/print.c src/keyboard.c src/edit.c \
     emu/nx8.c
 ./build/diff_all resource/rom.bin
 

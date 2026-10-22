@@ -135,10 +135,122 @@ static void test_hw_setup(void)
     }
 }
 
+static void test_keycode_cvt(void)
+{
+    static const uint16_t tables[] = {0x7B0Eu, 0x83DAu};
+    static const uint8_t samples[] = {0, 1, 2, 0x55, 0x80, 0xFF};
+
+    size_t t, s, r;
+    uint16_t col, row;
+
+    /* every single-bit column against every single-bit row (the sane key
+     * matrix cases), on both keycode tables */
+    for (t = 0; t < sizeof(tables) / sizeof(tables[0]); t++) {
+        for (col = 1; col <= 0x80u; col <<= 1) {
+            for (row = 1; row <= 0x80u; row <<= 1) {
+                uint16_t rc, cc;
+
+                random_image(0xE0000u + t * 200 + col * row * 4 + row);
+                image[0xE320] = (uint8_t)col;
+                image[0xE321] = (uint8_t)row;
+                Args args = {.er = {0xE320, tables[t]}};
+                rc = run_rom(0x29892, &args, "keycode_cvt");
+                begin_c();
+                cc = keycode_cvt(after_c, 0xE320, tables[t]);
+                check_ret("keycode_cvt", rc, cc);
+                check_mem("keycode_cvt", 0xE300, 0xE340);
+            }
+        }
+    }
+
+    /* messy inputs: zero bytes, multi-bit masks, all-ones */
+    for (t = 0; t < sizeof(tables) / sizeof(tables[0]); t++) {
+        for (s = 0; s < sizeof(samples) / sizeof(samples[0]); s++) {
+            for (r = 0; r < sizeof(samples) / sizeof(samples[0]); r++) {
+                uint16_t rc;
+
+                random_image(0xE1000u + t * 100 + s * 10 + r);
+                image[0xE320] = samples[s];
+                image[0xE321] = samples[r];
+                Args args = {.er = {0xE320, tables[t]}};
+                rc = run_rom(0x29892, &args, "keycode_cvt sample");
+                begin_c();
+                check_ret("keycode_cvt sample", rc,
+                          keycode_cvt(after_c, 0xE320, tables[t]));
+                check_mem("keycode_cvt sample", 0xE300, 0xE340);
+            }
+        }
+    }
+
+    /* random storage addresses, the result must still line up */
+    for (t = 0; t < sizeof(tables) / sizeof(tables[0]); t++) {
+        for (col = 0; col < 8; col++) {
+            uint16_t rc;
+
+            random_image(0xE2000u + t * 100 + col);
+            image[0xE35C] = (uint8_t)(0x10 + col);
+            image[0xE35D] = (uint8_t)(0x40 + col * 3);
+            Args args = {.er = {0xE35C, tables[t]}};
+            rc = run_rom(0x29892, &args, "keycode_cvt odd");
+            begin_c();
+            check_ret("keycode_cvt odd", rc,
+                      keycode_cvt(after_c, 0xE35C, tables[t]));
+        }
+    }
+}
+
+static void test_hw_bringup(void)
+{
+    static const uint8_t ki[] = {0x00, 0x04, 0xFB, 0xFF};
+    uint16_t rc, cc;
+    int i;
+
+    /* full boot sequence: both pictures must move the SFR pane the same way */
+    for (i = 0; i < 3; i++) {
+        random_image(0xE3000u + (unsigned)i);
+        Args boot = {.er = {0, 0}};
+        run_rom(0x0A012, &boot, "hw_init");
+        begin_c();
+        hw_init(after_c);
+        check_mem("hw_init", 0xF000, 0xF060);
+    }
+
+    /* the interrupt gate stubs: data space must not move a bit */
+    random_image(0xE3100u);
+    Args none = {.er = {0, 0}};
+    run_rom(0x0A058, &none, "interrupts_enable");
+    begin_c();
+    interrupts_enable();
+    check_mem("interrupts_enable", 0xF000, 0xF060);
+
+    random_image(0xE3101u);
+    run_rom(0x0A05C, &none, "interrupts_disable");
+    begin_c();
+    interrupts_disable();
+    check_mem("interrupts_disable", 0xF000, 0xF060);
+
+    /* ON-key watchdog: bit 2 of 0xF040 decides confirm vs bail-out, and the
+     * execution length differs (0 vs 4 waits), so both shapes get covered */
+    for (i = 0; i < (int)(sizeof(ki) / sizeof(ki[0])); i++) {
+        random_image(0xE3200u + (unsigned)i);
+        image[0xF040] = ki[i];
+        image[0xF046] = (uint8_t)(0x20 | i);   /* gets overwritten */
+        Args none2 = {.er = {0, 0}};
+        rc = run_rom(0x0A18A, &none2, "poll_on_key");
+        begin_c();
+        cc = poll_on_key(after_c);
+        check_ret("poll_on_key", (uint16_t)(rc & 0xFF), cc);
+        check_mem("poll_on_key", 0xF000, 0xF060);
+        check_mem("poll_on_key", 0xD140, 0xD160);
+    }
+}
+
 void test_keyboard(void)
 {
     test_timer_delay();
     test_check_any_key();
     test_key_helpers();
+    test_keycode_cvt();
+    test_hw_bringup();
     test_hw_setup();
 }

@@ -37,4 +37,12 @@ uint16_t memmove_nn(uint8_t *ds, uint16_t dst, uint16_t src, uint16_t n);
 uint16_t memset_n(uint8_t *ds, uint16_t dst, uint8_t value, uint16_t n);
 uint16_t memzero(uint8_t *ds, uint16_t dst, uint16_t n);
 
+/* mem.c - 0x09DE6: variable-slot save (plus its matrix/vector shadow) */
+uint16_t assign_var(uint8_t *ds, uint8_t slot, uint16_t src);
+
+/* mem.c - small leaf accessors of the mode/variable cluster */
+void store_0D10E(uint8_t *ds, uint16_t v);
+uint16_t mode193_value(uint8_t *ds, uint16_t arg);
+uint8_t var_mode_attr(uint8_t *ds);
+
 #endif /* NX_RUNTIME_H */
